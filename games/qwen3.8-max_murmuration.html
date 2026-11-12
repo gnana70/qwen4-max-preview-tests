@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Murmuration — dusk flight</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden;background:#0c0f24;overscroll-behavior:none}
+  body{cursor:crosshair}
+  canvas{position:fixed;inset:0;display:block}
+
+  .ui{position:fixed;z-index:2;pointer-events:none;color:#ffdcae;
+      text-shadow:0 1px 10px rgba(10,4,22,.85);
+      opacity:0;animation:rise 1.1s ease forwards}
+  header.ui{top:22px;left:26px;animation-delay:.25s}
+  header h1{
+    font:italic 600 clamp(20px,2.5vw,30px)/1 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    letter-spacing:.18em;text-transform:uppercase;color:#ffe3ba}
+  header p{margin-top:8px;font:400 10.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:.26em;text-transform:uppercase;color:rgba(255,220,175,.6)}
+  #status{top:24px;right:28px;text-align:right;animation-delay:.55s}
+  #stMain{display:block;
+    font:italic 500 clamp(13px,1.3vw,16px)/1.3 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    color:rgba(255,228,186,.9)}
+  #stMain.swap{animation:swap .55s ease}
+  #stTag{display:block;margin-top:7px;font:600 10px/1 ui-monospace,Menlo,Consolas,monospace;
+    letter-spacing:.34em;text-transform:uppercase;color:rgba(255,186,116,.75)}
+  #keys{bottom:22px;left:26px;display:flex;gap:10px;flex-wrap:wrap;animation-delay:.8s}
+  .chip{display:inline-flex;align-items:center;gap:9px;padding:8px 13px 8px 9px;
+    font:500 10.5px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    letter-spacing:.16em;text-transform:uppercase;color:rgba(255,222,178,.85);
+    border:1px solid rgba(255,205,150,.22);border-radius:3px;background:rgba(16,10,26,.38);
+    transition:background .35s,border-color .35s,color .35s,transform .35s}
+  .chip kbd{font:inherit;padding:3px 7px;border:1px solid rgba(255,205,150,.35);border-radius:3px;
+    color:#ffd9a6;background:rgba(255,200,140,.07);box-shadow:0 2px 0 rgba(255,200,140,.14)}
+  .chip.active{border-color:rgba(255,190,110,.8);background:rgba(255,170,90,.16);
+    color:#ffe8c2;transform:translateY(-2px)}
+  .chip.hit{animation:hit .5s ease}
+  @keyframes hit{0%{transform:scale(.93)}35%{transform:scale(1.07)}100%{transform:scale(1)}}
+  @keyframes rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+  @keyframes swap{from{opacity:.15;transform:translateY(5px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<header class="ui">
+  <h1>Murmuration</h1>
+  <p>eight hundred starlings over the marsh</p>
+</header>
+
+<div id="status" class="ui">
+  <span id="stMain" class="swap">free flight</span>
+  <b id="stTag">boids</b>
+</div>
+
+<nav id="keys" class="ui">
+  <span class="chip" id="chip-f"><kbd>F</kbd>fish</span>
+  <span class="chip" id="chip-b"><kbd>B</kbd>bird</span>
+  <span class="chip active" id="chip-s"><kbd>space</kbd>scatter</span>
+  <span class="chip" id="chip-h"><kbd>click</kbd>hawk</span>
+</nav>
+
+<script>
+(()=>{
+"use strict";
+
+/* ---------------- state ---------------- */
+const N = 800;
+const cvs = document.getElementById('c');
+const ctx = cvs.getContext('2d');
+let W=0,H=0,DPR=1, sky=null, sctx=null;
+
+const px=new Float32Array(N), py=new Float32Array(N),
+      vx=new Float32Array(N), vy=new Float32Array(N);
+const size=new Float32Array(N), flapPh=new Float32Array(N), flapSp=new Float32Array(N),
+      wobPh=new Float32Array(N), wobR=new Float32Array(N);
+const grabT=new Float32Array(N), tgtX=new Float32Array(N), tgtY=new Float32Array(N);
+let shapeCx=0, shapeCy=0;
+let mode='flock';
+
+const R=46, R2=R*R, SEPR=15, SEPR2=SEPR*SEPR, cell=R;
+let cols=0, rows=0, head=new Int32Array(0);
+const nxt=new Int32Array(N);
+
+const MAXS=185, MINS=85, MAXF=820;      // free flocking
+const TMAXS=235, TF=1150;               // transit / seek
+
+const mx={x:-9999,y:-9999,on:false};
+let hawkUntil=-9;
+let twinkles=[], shoot=null, nextShoot=6;
+
+function mulberry(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;
+  let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;
+  return ((t^t>>>14)>>>0)/4294967296;};}
+
+/* ---------------- dusk sky (cached) ---------------- */
+function buildSky(){
+  sky=document.createElement('canvas');
+  sky.width=Math.max(1,Math.round(W*DPR)); sky.height=Math.max(1,Math.round(H*DPR));
+  sctx=sky.getContext('2d');
+  sctx.setTransform(DPR,0,0,DPR,0,0);
+  const rnd=mulberry(20260214);
+
+  const g=sctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0.00,'#0a0e26');
+  g.addColorStop(0.34,'#232048');
+  g.addColorStop(0.55,'#4b2d56');
+  g.addColorStop(0.72,'#8a4152');
+  g.addColorStop(0.84,'#d06a3f');
+  g.addColorStop(0.92,'#f0a054');
+  g.addColorStop(1.00,'#f7c47a');
+  sctx.fillStyle=g; sctx.fillRect(0,0,W,H);
+
+  // sun glow
+  const sx=W*0.60, sy=H*0.815;
+  let rg=sctx.createRadialGradient(sx,sy,0,sx,sy,Math.max(W,H)*0.55);
+  rg.addColorStop(0,'rgba(255,214,140,.5)');
+  rg.addColorStop(.2,'rgba(255,168,92,.2)');
+  rg.addColorStop(.55,'rgba(255,140,80,.05)');
+  rg.addColorStop(1,'rgba(255,140,80,0)');
+  sctx.fillStyle=rg; sctx.fillRect(0,0,W,H);
+
+  // stars
+  for(let i=0;i<170;i++){
+    const x=rnd()*W, y=rnd()*rnd()*H*0.62;
+    const a=(1-y/(H*0.65))*(0.22+rnd()*0.6);
+    sctx.fillStyle='rgba(255,244,230,'+a.toFixed(3)+')';
+    sctx.fillRect(x,y,rnd()<.88?0.9:1.4,rnd()<.88?0.9:1.4);
+  }
+
+  // cloud wisps
+  const bands=[[0.30,[70,48,110]],[0.50,[122,62,102]],[0.66,[200,92,80]],[0.77,[244,146,92]]];
+  for(const b of bands){
+    const y=H*b[0], n=3+((rnd()*3)|0);
+    for(let i=0;i<n;i++){
+      const x=rnd()*W, rw=W*(0.14+rnd()*0.22), a=0.15+rnd()*0.14;
+      sctx.save(); sctx.translate(x,y); sctx.scale(1,0.10+rnd()*0.10);
+      const cg=sctx.createRadialGradient(0,0,0,0,0,rw);
+      cg.addColorStop(0,'rgba('+b[1][0]+','+b[1][1]+','+b[1][2]+','+a.toFixed(3)+')');
+      cg.addColorStop(1,'rgba('+b[1][0]+','+b[1][1]+','+b[1][2]+',0)');
+      sctx.fillStyle=cg; sctx.beginPath(); sctx.arc(0,0,rw,0,6.2832); sctx.fill(); sctx.restore();
+    }
+  }
+  for(let i=0;i<2;i++){ // sunlit streak
+    const x=sx+(rnd()-0.5)*W*0.22, rw=W*(0.1+rnd()*0.12);
+    sctx.save(); sctx.translate(x,H*0.795); sctx.scale(1,0.08);
+    const cg=sctx.createRadialGradient(0,0,0,0,0,rw);
+    cg.addColorStop(0,'rgba(255,196,124,0.3)'); cg.addColorStop(1,'rgba(255,196,124,0)');
+    sctx.fillStyle=cg; sctx.beginPath(); sctx.arc(0,0,rw,0,6.2832); sctx.fill(); sctx.restore();
+  }
+
+  // sun disc
+  rg=sctx.createRadialGradient(sx,sy,0,sx,sy,26);
+  rg.addColorStop(0,'rgba(255,247,218,.95)');
+  rg.addColorStop(.5,'rgba(255,226,164,.55)');
+  rg.addColorStop(1,'rgba(255,212,142,0)');
+  sctx.fillStyle=rg; sctx.beginPath(); sctx.arc(sx,sy,26,0,6.2832); sctx.fill();
+
+  // hills + ground + tree
+  hillLayer(H*0.870,H*0.045,'#3a1e46',mulberry(11));
+  hillLayer(H*0.912,H*0.035,'#1c0f2e',mulberry(7));
+  tree(W*0.845,H*0.906,mulberry(42));
+  sctx.fillStyle='#120a1e'; sctx.fillRect(0,H*0.945,W,H*0.055+2);
+
+  // vignette
+  const vg=sctx.createRadialGradient(W/2,H*0.5,Math.min(W,H)*0.35,W/2,H*0.5,Math.max(W,H)*0.78);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(6,4,16,0.42)');
+  sctx.fillStyle=vg; sctx.fillRect(0,0,W,H);
+
+  // twinkling stars (dynamic)
+  twinkles=[]; const r2=mulberry(99);
+  for(let i=0;i<64;i++) twinkles.push({
+    x:r2()*W, y:r2()*r2()*H*0.55, r:0.7+r2()*1.2,
+    ph:r2()*6.2832, sp:0.5+r2()*2.2, base:0.3+r2()*0.55});
+  shoot=null;
+}
+
+function hillLayer(baseY,amp,color,rnd){
+  const seg=Math.max(3,Math.round(W/260));
+  const pts=[];
+  for(let i=0;i<=seg;i++) pts.push([W*i/seg, baseY-rnd()*amp]);
+  sctx.fillStyle=color; sctx.beginPath();
+  sctx.moveTo(-2,H+4); sctx.lineTo(pts[0][0],pts[0][1]);
+  for(let i=1;i<pts.length;i++){
+    const mxp=(pts[i-1][0]+pts[i][0])/2, myp=(pts[i-1][1]+pts[i][1])/2;
+    sctx.quadraticCurveTo(pts[i-1][0],pts[i-1][1],mxp,myp);
+  }
+  sctx.lineTo(W+2,pts[pts.length-1][1]); sctx.lineTo(W+2,H+4);
+  sctx.closePath(); sctx.fill();
+}
+
+function tree(x,y,rnd){
+  sctx.strokeStyle='#0f0819'; sctx.lineCap='round';
+  (function br(x,y,a,len,w,d){
+    if(d===0||len<2.2) return;
+    const x2=x+Math.cos(a)*len, y2=y+Math.sin(a)*len;
+    sctx.lineWidth=w; sctx.beginPath(); sctx.moveTo(x,y); sctx.lineTo(x2,y2); sctx.stroke();
+    const n=d>4?2:(rnd()<0.72?2:3);
+    for(let k=0;k<n;k++)
+      br(x2,y2,a+(rnd()-0.5)*1.05+(k-(n-1)/2)*0.5,len*(0.64+rnd()*0.15),w*0.62,d-1);
+  })(x,y,-Math.PI/2,H*0.052,5,7);
+}
+
+/* ---------------- formation shapes ---------------- */
+const FISH_PTS=new Float32Array([
+  -1.00, 0.00, -0.86,-0.10, -0.55,-0.17, -0.34,-0.19,
+  -0.22,-0.33, -0.10,-0.18,  0.30,-0.13,  0.62,-0.07,
+   0.72,-0.05,  1.02,-0.28,  0.82, 0.00,  1.02, 0.28,
+   0.72, 0.05,  0.62, 0.07,  0.30, 0.12,  0.12, 0.13,
+   0.20, 0.26, -0.02, 0.15, -0.30, 0.17, -0.45, 0.15,
+  -0.55, 0.27, -0.63, 0.12, -0.86, 0.08]);
+
+const BIRD_PTS=new Float32Array([
+   0.000,-0.42,  0.055,-0.33,  0.09,-0.24,  0.14,-0.14,
+   0.42,-0.235,  0.72,-0.27,   1.00,-0.19,  1.04,-0.115,
+   0.88,-0.05,   0.83, 0.015,  0.72,-0.03,  0.66, 0.035,
+   0.545,-0.015, 0.48, 0.045,  0.36, 0.00,  0.29, 0.05,
+   0.15, 0.05,   0.20, 0.16,   0.23, 0.30,  0.11, 0.27,
+   0.00, 0.33,  -0.11, 0.27,  -0.23, 0.30, -0.20, 0.16,
+  -0.15, 0.05,  -0.29, 0.05,  -0.36, 0.00, -0.48, 0.045,
+  -0.545,-0.015,-0.66, 0.035, -0.72,-0.03, -0.83, 0.015,
+  -0.88,-0.05,  -1.04,-0.115, -1.00,-0.19, -0.72,-0.27,
+  -0.42,-0.235, -0.14,-0.14,  -0.09,-0.24, -0.055,-0.33]);
+
+const EYE_N=42;
+
+function catmull(pts,per){
+  const n=pts.length/2, out=new Float32Array(n*per*2); let o=0;
+  for(let i=0;i<n;i++){
+    const i0=((i-1+n)%n)*2,i1=i*2,i2=((i+1)%n)*2,i3=((i+2)%n)*2;
+    const x0=pts[i0],y0=pts[i0+1],x1=pts[i1],y1=pts[i1+1],
+          x2=pts[i2],y2=pts[i2+1],x3=pts[i3],y3=pts[i3+1];
+    for(let s=0;s<per;s++){
+      const t=s/per,t2=t*t,t3=t2*t;
+      out[o++]=0.5*((2*x1)+(-x0+x2)*t+(2*x0-5*x1+4*x2-x3)*t2+(-x0+3*x1-3*x2+x3)*t3);
+      out[o++]=0.5*((2*y1)+(-y0+y2)*t+(2*y0-5*y1+4*y2-y3)*t2+(-y0+3*y1-3*y2+y3)*t3);
+    }
+  }
+  return out;
+}
+
+function resample(poly,n){
+  const m=poly.length/2, cum=new Float32Array(m+1);
+  for(let i=1;i<=m;i++){
+    const a=((i-1)%m)*2,b=(i%m)*2;
+    cum[i]=cum[i-1]+Math.hypot(poly[b]-poly[a],poly[b+1]-poly[a+1]);
+  }
+  const out=new Float32Array(n*2); let seg=1;
+  for(let k=0;k<n;k++){
+    const target=cum[m]*k/n;
+    while(seg<m && cum[seg]<target) seg++;
+    const d=(cum[seg]-cum[seg-1])||1, f=(target-cum[seg-1])/d;
+    const a=((seg-1)%m)*2,b=(seg%m)*2;
+    out[k*2]  =poly[a]  +(poly[b]  -poly[a]  )*f;
+    out[k*2+1]=poly[a+1]+(poly[b+1]-poly[a+1])*f;
+  }
+  return out;
+}
+
+function shapePoints(kind){
+  const base=catmull(kind==='fish'?FISH_PTS:BIRD_PTS,26);
+  const nC=kind==='fish'?N-EYE_N:N;
+  const c=resample(base,nC);
+  if(kind!=='fish') return c;
+  const full=new Float32Array(N*2); full.set(c,0);
+  for(let e=0;e<EYE_N;e++){
+    const a=e/EYE_N*6.2832;
+    full[(nC+e)*2]  =-0.60+Math.cos(a)*0.045;
+    full[(nC+e)*2+1]=-0.03+Math.sin(a)*0.045;
+  }
+  return full;
+}
+
+function buildShape(kind,delayBase){
+  const s=shapePoints(kind);
+  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  for(let i=0;i<N;i++){
+    const x=s[i*2],y=s[i*2+1];
+    if(x<minx)minx=x; if(x>maxx)maxx=x;
+    if(y<miny)miny=y; if(y>maxy)maxy=y;
+  }
+  const bw=maxx-minx, bh=maxy-miny;
+  const fw=W*(kind==='fish'?0.80:0.82), fh=H*(kind==='fish'?0.60:0.64);
+  const sc=Math.min(fw/bw,fh/bh);
+  shapeCx=W*0.5; shapeCy=H*(kind==='fish'?0.46:0.42);
+  const ox=shapeCx-(minx+maxx)/2*sc, oy=shapeCy-(miny+maxy)/2*sc;
+
+  const rx=new Float32Array(N), ry=new Float32Array(N);
+  for(let i=0;i<N;i++){ rx[i]=s[i*2]*sc+ox-shapeCx; ry[i]=s[i*2+1]*sc+oy-shapeCy; }
+
+  // match flock and outline by angle around their centroids → few crossings
+  let bcx=0,bcy=0;
+  for(let i=0;i<N;i++){ bcx+=px[i]; bcy+=py[i]; }
+  bcx/=N; bcy/=N;
+  const bIdx=new Array(N), sIdx=new Array(N);
+  const bA=new Float32Array(N), sA=new Float32Array(N);
+  for(let i=0;i<N;i++){
+    bIdx[i]=i; sIdx[i]=i;
+    bA[i]=Math.atan2(py[i]-bcy,px[i]-bcx);
+    sA[i]=Math.atan2(ry[i],rx[i]);
+  }
+  bIdx.sort((a,b)=>bA[a]-bA[b]);
+  sIdx.sort((a,b)=>sA[a]-sA[b]);
+  const a0=bA[bIdx[0]]; let k0=0,best=1e9;
+  for(let k=0;k<N;k++){
+    const d=Math.atan2(Math.sin(sA[sIdx[k]]-a0),Math.cos(sA[sIdx[k]]-a0));
+    const ad=d<0?-d:d; if(ad<best){best=ad;k0=k;}
+  }
+  const t0=performance.now()/1000, dist=new Float32Array(N);
+  let maxD=1;
+  for(let k=0;k<N;k++){
+    const bi=bIdx[k], si=sIdx[(k+k0)%N];
+    tgtX[bi]=rx[si]; tgtY[bi]=ry[si];
+    const dx=px[bi]-(shapeCx+rx[si]), dy=py[bi]-(shapeCy+ry[si]);
+    const d=Math.sqrt(dx*dx+dy*dy); dist[bi]=d; if(d>maxD)maxD=d;
+  }
+  // far birds leave first → the flock streams in as a wave
+  for(let i=0;i<N;i++)
+    grabT[i]=t0+delayBase+(1-dist[i]/maxD)*0.55+Math.random()*0.3;
+}
+
+/* ---------------- simulation ---------------- */
+function step(t,dt){
+  head.fill(-1);
+  const invC=1/cell;
+  for(let i=0;i<N;i++){
+    let cx=(px[i]*invC)|0; if(cx<0)cx=0; else if(cx>=cols)cx=cols-1;
+    let cy=(py[i]*invC)|0; if(cy<0)cy=0; else if(cy>=rows)cy=rows-1;
+    const c=cy*cols+cx; nxt[i]=head[c]; head[c]=i;
+  }
+  const seekMode=(mode!=='flock');
+  const breath=1+0.012*Math.sin(t*0.55);
+  const ax0=W*0.5+Math.sin(t*0.05)*W*0.26+Math.sin(t*0.021+1.3)*W*0.09;
+  const ay0=H*0.40+Math.sin(t*0.041+2.1)*H*0.13;
+  const hawkOn=t<hawkUntil, pr=hawkOn?240:120, pr2=pr*pr;
+
+  for(let i=0;i<N;i++){
+    const xi=px[i], yi=py[i];
+    const seeking=seekMode && t>=grabT[i];
+
+    let gx=(xi*invC)|0; if(gx<0)gx=0; else if(gx>=cols)gx=cols-1;
+    let gy=(yi*invC)|0; if(gy<0)gy=0; else if(gy>=rows)gy=rows-1;
+    const x0=gx>0?gx-1:0, x1=gx<cols-1?gx+1:cols-1;
+    const y0=gy>0?gy-1:0, y1=gy<rows-1?gy+1:rows-1;
+
+    let sepX=0,sepY=0, aliX=0,aliY=0, cohX=0,cohY=0, nn=0, seen=0;
+    scan:
+    for(let yy=y0;yy<=y1;yy++){
+      const rb=yy*cols;
+      for(let xx=x0;xx<=x1;xx++){
+        let j=head[rb+xx];
+        while(j!==-1){
+          if(j!==i){
+            const dx=px[j]-xi, dy=py[j]-yi, d2=dx*dx+dy*dy;
+            if(d2<R2){
+              if(!seeking && nn<9){ aliX+=vx[j]; aliY+=vy[j]; cohX+=px[j]; cohY+=py[j]; nn++; }
+              if(d2<SEPR2){ const iv=1/(d2+0.01); sepX-=dx*iv; sepY-=dy*iv; }
+            }
+          }
+          j=nxt[j];
+          if(++seen>96) break scan;
+        }
+      }
+    }
+
+    let ax=0, ay=0;
+    const sm2=sepX*sepX+sepY*sepY;
+    if(sm2>1e-6){
+      const iv=1/Math.sqrt(sm2), mag=seeking?300:820;
+      ax+=sepX*iv*mag; ay+=sepY*iv*mag;
+    }
+
+    if(!seeking){
+      if(nn>0){
+        const inv=1/nn;
+        aliX*=inv; aliY*=inv;
+        let m=Math.sqrt(aliX*aliX+aliY*aliY);
+        if(m>0.001){
+          let dx=aliX/m*MAXS-vx[i], dy=aliY/m*MAXS-vy[i];
+          const mm=Math.sqrt(dx*dx+dy*dy);
+          if(mm>MAXF){ const k=MAXF/mm; dx*=k; dy*=k; }
+          ax+=dx*0.95; ay+=dy*0.95;
+        }
+        cohX=cohX*inv-xi; cohY=cohY*inv-yi;
+        const cm=Math.sqrt(cohX*cohX+cohY*cohY);
+        if(cm>0.001){
+          let dx=cohX/cm*MAXS-vx[i], dy=cohY/cm*MAXS-vy[i];
+          const mm=Math.sqrt(dx*dx+dy*dy);
+          if(mm>MAXF){ const k=MAXF/mm; dx*=k; dy*=k; }
+          ax+=dx*0.6; ay+=dy*0.6;
+        }
+      }
+      // wingbeat wander, perpendicular to travel
+      const sp0=Math.sqrt(vx[i]*vx[i]+vy[i]*vy[i])||1;
+      const wv=Math.sin(t*2.2+flapPh[i]*3.7)+0.6*Math.sin(t*1.13+flapPh[i]*1.9);
+      ax+=(-vy[i]/sp0)*wv*88; ay+=(vx[i]/sp0)*wv*88;
+      // drifting point of interest keeps the flock roaming
+      const tx=ax0-xi, ty=ay0-yi, td=Math.sqrt(tx*tx+ty*ty)||1;
+      ax+=tx/td*30; ay+=ty/td*30;
+    } else {
+      // arrive at a gently orbiting, breathing anchor on the outline
+      const wob=Math.sin(t*1.6+wobPh[i])*wobR[i];
+      const wob2=Math.cos(t*1.25+wobPh[i]*1.7)*wobR[i];
+      const tX=shapeCx+tgtX[i]*breath+wob;
+      const tY=shapeCy+tgtY[i]*breath+wob2;
+      let dx=tX-xi, dy=tY-yi;
+      const d=Math.sqrt(dx*dx+dy*dy)||0.0001;
+      const sp=d<70?TMAXS*d/70:TMAXS;
+      let sx=dx/d*sp-vx[i], sy=dy/d*sp-vy[i];
+      const sM=Math.sqrt(sx*sx+sy*sy);
+      if(sM>TF){ const k=TF/sM; sx*=k; sy*=k; }
+      ax+=sx; ay+=sy;
+      if(d<30){ const k=Math.min(1,(1-d/30)*3.0*dt); vx[i]*=1-k; vy[i]*=1-k; }
+    }
+
+    // pointer = hawk shadow
+    if(mx.on){
+      const dx=xi-mx.x, dy=yi-mx.y, d2p=dx*dx+dy*dy;
+      if(d2p<pr2 && d2p>1){
+        const d=Math.sqrt(d2p);
+        const f=(1-d/pr)*(hawkOn?4200:(seeking?1000:2600))/d;
+        ax+=dx*f; ay+=dy*f;
+      }
+    }
+
+    // soft containment above the hills
+    const CF=seeking?800:1500, M=90;
+    if(xi<M) ax+=((M-xi)/M)*CF; else if(xi>W-M) ax-=((xi-(W-M))/M)*CF;
+    const top=M*0.8;
+    if(yi<top) ay+=((top-yi)/top)*CF;
+    const bl=H*0.80;
+    if(yi>bl-M) ay-=((yi-(bl-M))/M)*CF;
+
+    vx[i]+=ax*dt; vy[i]+=ay*dt;
+    let v2=vx[i]*vx[i]+vy[i]*vy[i];
+    const cap=seeking?TMAXS:MAXS;
+    if(v2>cap*cap){ const k=cap/Math.sqrt(v2); vx[i]*=k; vy[i]*=k; }
+    else if(!seeking && v2<MINS*MINS && v2>1){ const k=MINS/Math.sqrt(v2); vx[i]*=k; vy[i]*=k; }
+    px[i]+=vx[i]*dt; py[i]+=vy[i]*dt;
+  }
+}
+
+/* ---------------- rendering ---------------- */
+function render(t,dt){
+  // translucent sky repaint = short motion trails
+  ctx.globalAlpha=0.45;
+  ctx.drawImage(sky,0,0,W,H);
+  ctx.globalAlpha=1;
+
+  ctx.fillStyle='#fff3e0';
+  for(let i=0;i<twinkles.length;i++){
+    const s=twinkles[i];
+    ctx.globalAlpha=s.base*(0.3+0.7*(0.5+0.5*Math.sin(t*s.sp+s.ph)));
+    ctx.fillRect(s.x,s.y,s.r,s.r);
+  }
+  ctx.globalAlpha=1;
+
+  // occasional shooting star
+  if(!shoot && t>nextShoot){
+    shoot={x:W*(0.15+Math.random()*0.6), y:H*(0.06+Math.random()*0.18),
+           vx:(Math.random()<0.5?-1:1)*(260+Math.random()*160),
+           vy:120+Math.random()*90, life:0.9, age:0};
+    nextShoot=t+9+Math.random()*14;
+  }
+  if(shoot){
+    shoot.age+=dt; shoot.x+=shoot.vx*dt; shoot.y+=shoot.vy*dt;
+    const f=1-shoot.age/shoot.life;
+    if(f<=0) shoot=null;
+    else{
+      const m=Math.hypot(shoot.vx,shoot.vy), ux=shoot.vx/m, uy=shoot.vy/m, L=20+70*f;
+      const gr=ctx.createLinearGradient(shoot.x,shoot.y,shoot.x-ux*L,shoot.y-uy*L);
+      gr.addColorStop(0,'rgba(255,244,220,'+(0.9*f).toFixed(3)+')');
+      gr.addColorStop(1,'rgba(255,244,220,0)');
+      ctx.strokeStyle=gr; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.moveTo(shoot.x,shoot.y);
+      ctx.lineTo(shoot.x-ux*L,shoot.y-uy*L); ctx.stroke();
+    }
+  }
+
+  // the flock — one path, one fill
+  const seekMode=(mode!=='flock');
+  ctx.beginPath();
+  for(let i=0;i<N;i++){
+    const sp=Math.sqrt(vx[i]*vx[i]+vy[i]*vy[i])||0.001;
+    const dx=vx[i]/sp, dy=vy[i]/sp;
+    const seeking=seekMode && t>=grabT[i];
+    const L=(seeking?3.9:4.7)*size[i];
+    const flap=0.5+0.5*Math.sin(t*flapSp[i]+flapPh[i]);
+    const w=L*0.8*(0.42+0.58*flap);
+    const x=px[i], y=py[i];
+    ctx.moveTo(x+dx*L, y+dy*L);
+    ctx.lineTo(x-dy*w-dx*L*0.18, y+dx*w-dy*L*0.18);
+    ctx.lineTo(x-dx*L*0.62, y-dy*L*0.62);
+    ctx.lineTo(x+dy*w-dx*L*0.18, y-dx*w-dy*L*0.18);
+    ctx.closePath();
+  }
+  ctx.fillStyle='rgba(15,9,20,0.94)';
+  ctx.fill();
+
+  // hawk glyph while swooping
+  if(t<hawkUntil && mx.on){
+    let dx=W*0.5-mx.x, dy=H*0.42-mx.y;
+    const m=Math.hypot(dx,dy)||1; dx/=m; dy/=m;
+    const L=15, w=11*(0.6+0.4*Math.sin(t*9));
+    ctx.beginPath();
+    ctx.moveTo(mx.x+dx*L, mx.y+dy*L);
+    ctx.lineTo(mx.x-dy*w-dx*L*0.18, mx.y+dx*w-dy*L*0.18);
+    ctx.lineTo(mx.x-dx*L*0.62, mx.y-dy*L*0.62);
+    ctx.lineTo(mx.x+dy*w-dx*L*0.18, mx.y-dx*w-dy*L*0.18);
+    ctx.closePath();
+    ctx.fillStyle='rgba(10,5,14,0.95)'; ctx.fill();
+  }
+}
+
+/* ---------------- HUD ---------------- */
+const chipF=document.getElementById('chip-f'), chipB=document.getElementById('chip-b'),
+      chipS=document.getElementById('chip-s'), chipH=document.getElementById('chip-h'),
+      stMain=document.getElementById('stMain'), stTag=document.getElementById('stTag');
+let holdTimer=0;
+
+function pulse(el){ el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit'); }
+function swapStatus(){ stMain.classList.remove('swap'); void stMain.offsetWidth; stMain.classList.add('swap'); }
+
+function setMode(kind){
+  if(mode===kind) return;
+  mode=kind; clearTimeout(holdTimer);
+  if(kind==='flock'){
+    stMain.textContent='free flight'; stTag.textContent='boids';
+  }else{
+    buildShape(kind,0);
+    stMain.textContent=kind==='fish'?'gathering into a fish':'gathering into a bird';
+    stTag.textContent='morphing';
+    holdTimer=setTimeout(()=>{
+      if(mode===kind){
+        stMain.textContent=kind==='fish'?'holding · the fish':'holding · the bird';
+        stTag.textContent='formation';
+      }
+    },2400);
+  }
+  chipF.classList.toggle('active',kind==='fish');
+  chipB.classList.toggle('active',kind==='bird');
+  chipS.classList.toggle('active',kind==='flock');
+  swapStatus();
+}
+
+/* ---------------- input ---------------- */
+addEventListener('keydown',e=>{
+  if(e.repeat) return;
+  const k=e.key.toLowerCase();
+  if(k==='f'){ setMode('fish'); pulse(chipF); }
+  else if(k==='b'){ setMode('bird'); pulse(chipB); }
+  else if(k===' '||e.code==='Space'){ e.preventDefault(); setMode('flock'); pulse(chipS); }
+});
+addEventListener('pointermove',e=>{ mx.x=e.clientX; mx.y=e.clientY; mx.on=true; });
+addEventListener('pointerdown',e=>{
+  mx.x=e.clientX; mx.y=e.clientY; mx.on=true;
+  hawkUntil=performance.now()/1000+0.55; pulse(chipH);
+});
+document.addEventListener('mouseleave',()=>{ mx.on=false; });
+addEventListener('blur',()=>{ mx.on=false; });
+
+/* ---------------- boot ---------------- */
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,1.5);
+  W=window.innerWidth; H=window.innerHeight;
+  cvs.width=Math.round(W*DPR); cvs.height=Math.round(H*DPR);
+  cvs.style.width=W+'px'; cvs.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  cols=Math.max(1,Math.ceil(W/cell)); rows=Math.max(1,Math.ceil(H/cell));
+  head=new Int32Array(cols*rows);
+  buildSky();
+  if(mode!=='flock') buildShape(mode,0);
+  ctx.globalAlpha=1; ctx.drawImage(sky,0,0,W,H);
+}
+let rto=0;
+addEventListener('resize',()=>{ clearTimeout(rto); rto=setTimeout(resize,120); });
+
+resize();
+
+(function seed(){
+  const cx0=W*0.44, cy0=H*0.40, R0=Math.min(W,H)*0.16;
+  for(let i=0;i<N;i++){
+    const a=Math.random()*6.2832, r=Math.sqrt(Math.random())*R0;
+    px[i]=cx0+Math.cos(a)*r; py[i]=cy0+Math.sin(a)*r;
+    const va=-0.4+(Math.random()-0.5)*0.9, s=120+Math.random()*60;
+    vx[i]=Math.cos(va)*s; vy[i]=Math.sin(va)*s;
+    size[i]=0.72+Math.random()*0.56;
+    flapPh[i]=Math.random()*6.2832; flapSp[i]=7+Math.random()*7;
+    wobPh[i]=Math.random()*6.2832;  wobR[i]=2.2+Math.random()*3.2;
+  }
+})();
+
+let last=performance.now()/1000;
+function frame(){
+  const now=performance.now()/1000;
+  let dt=now-last; last=now;
+  if(dt>0.05) dt=0.05; if(dt<=0) dt=0.0001;
+  step(now,dt);
+  render(now,dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

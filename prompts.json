@@ -1,0 +1,14 @@
+{
+ "app": "chat.qwen.ai (free Qwen app, web), mode left on default 'Auto', one try each, new chat per prompt",
+ "models": [
+  "Qwen4-Max-Preview",
+  "Qwen3.8-Max"
+ ],
+ "prompts": {
+  "build": "Create a single self-contained HTML file (no external libraries, no network requests, no images) that shows a murmuration: about 800 birds flying as one flock (boids-style flocking) over a dusk sky, filling the whole window. When I press F, the flock smoothly flies into the outline of a big fish and holds that shape while the birds keep moving slightly. When I press B, it does the same but forms a giant bird with spread wings. When I press Space, the birds go back to free flocking. It should run smoothly at 60 fps. Reply with only the complete HTML in one code block.",
+  "code": "Write a Python function evaluate(expr: str) -> float that evaluates arithmetic expressions given as text. Support integers and decimals, + - * /, ^ for powers (right-associative, and binding tighter than unary minus, so -2^2 = -4), unary minus, parentheses and spaces. Do not use eval, exec, compile, ast, or any parsing library. Raise ValueError for invalid input. Reply with only the code.",
+  "reason": "How many times in 24 hours do the hour and minute hands of a clock form a right angle? Give the number first, then a short explanation.",
+  "gta": "Create a GTA-style open-world game in a single self-contained HTML file (no external libraries, no network requests, no images). Top-down view of a city with roads, sidewalks and buildings. The player starts on foot next to a parked car: WASD or arrow keys to move, E to get in or out of a car, then drive with the same keys. Add traffic cars and pedestrians that move around on their own. Crashing into things or hitting pedestrians raises a wanted level, and police cars chase you; the wanted level drops if you escape. Show a minimap, your speed and the wanted stars. Make it fun and run smoothly at 60 fps. Reply with only the complete HTML in one code block."
+ },
+ "gta_note": "Viewer request (12 Nov 2026): GTA clone test. Same rules: chat.qwen.ai guest session, Thinking mode, one try each, new chat, one request at a time."
+}
