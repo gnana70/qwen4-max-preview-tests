@@ -17,7 +17,7 @@ Every file in `games/` and `answers/` is the model's answer **exactly as it came
 | **Murmuration** – one HTML file, ~800 birds, F = fish, B = giant bird ([prompt](prompts.json)) | Works first try; tight, clean shapes (the fish has an eye). ~12 min. [`games/qwen4-max-preview_murmuration.html`](games/qwen4-max-preview_murmuration.html) | Works first try; shapes recognizable but loose. ~19 min. [`games/qwen3.8-max_murmuration.html`](games/qwen3.8-max_murmuration.html) |
 | **Coding** – `evaluate(expr)` from scratch, 20 hidden tests | 20/20, ~2.5 min. [`answers/qwen4-max-preview_evaluate.py`](answers/qwen4-max-preview_evaluate.py) | 20/20, ~17 min. [`answers/qwen3.8-max_evaluate.py`](answers/qwen3.8-max_evaluate.py) |
 | **Clock question** – right angles in 24 h (answer: 44) | 44, and explains why not 48 | 44 |
-| **GTA clone** (viewer request) – top-down open world, car entry, traffic, police, minimap | "NEON BAY": title screen, 3 modes, enter/exit cars, traffic, pedestrians, minimap, speedometer, courier jobs. 2,409 lines, ~1 h 34 min. [`games/qwen4-max-preview_gta-neon-bay.html`](games/qwen4-max-preview_gta-neon-bay.html) | Running now; added when it finishes |
+| **GTA clone** (viewer request) – top-down open world, car entry, traffic, police, minimap | **"NEON BAY"**: title screen, 3 modes, enter/exit cars, traffic, pedestrians, round minimap, speedometer, courier jobs, beach and parks. 2,409 lines, ~1 h 34 min. [`games/qwen4-max-preview_gta-neon-bay.html`](games/qwen4-max-preview_gta-neon-bay.html) | **"Grand Tiny Auto"**: title screen, steal the red car, traffic, pedestrians, wanted stars and police, cash, minimap, speed. 1,216 lines, ~39 min. [`games/qwen3.8-max_gta-grand-tiny-auto.html`](games/qwen3.8-max_gta-grand-tiny-auto.html) |
 
 Extra code check (run afterwards on both answers, `tools/check_extra.py`): 19/20 each; both fail only on 200-deep nested parentheses (Python's recursion limit, not in the spec).
 
@@ -25,6 +25,9 @@ Extra code check (run afterwards on both answers, `tools/check_extra.py`): 19/20
 Download the repo (Code → Download ZIP) and double-click a file in `games/`.
 - Murmuration: **F** fish, **B** giant bird, **Space** free flight.
 - NEON BAY: **Enter** to start, **WASD / arrows** move and drive, **E** get in / out, **Space** handbrake, **M** map, **H** horn, **P** pause.
+- Grand Tiny Auto: **any key** to start, **WASD / arrows** move and drive, **E** get in / out, **Space** handbrake, **Shift** sprint, **H** horn, **M** sound.
+
+GTA verdict from the same 34-second scripted run: both games meet the brief with no errors. Qwen4-Max's is far more elaborate (missions, modes, richer city) but heavier to run (10.3 vs 1.2 ms of JavaScript per frame); Qwen3.8-Max finished in less than half the time.
 
 ## Re-run the checks
 ```bash

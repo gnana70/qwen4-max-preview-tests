@@ -34,4 +34,9 @@ Gameplay script for both (tests/gta_keys.txt): E at 1 s (get in car), drive with
 | model | sent (UTC) | done | notes |
 |---|---|---|---|
 | Qwen4-Max-Preview | 15:55:32 | | At ~16:01 the page showed "The request is ended!", but the request kept running on Qwen's server (Regenerate answered "The chat is in progress!"; no second request was started). Reloading at 16:11 re-attached to the same, still-thinking request. Still one try. Thinking ended ≈16:54 (code visible 16:54:53); answer complete ≤17:29:14 → ~1 h 34 min total (~59 min thinking, ~35 min writing). 2,409-line HTML "NEON BAY · mini open world", 116,119 bytes, sha256 94e9dcfd…; title screen with Casual/Classic/Chaos modes. |
-| Qwen3.8-Max | 17:32:10 | | chat /c/66a571a6-11da-462a-8369-9f07bd290f21 |
+| Qwen3.8-Max | 17:32:10 | ≤18:11:36 (~39 min; code visible by 18:01) | chat /c/66a571a6-…; page stream stalled ~17:41–17:56, reload re-attached (same request). 1,216-line HTML "Grand Tiny Auto — Micro City Rampage", 51,811 bytes, sha256 4fea7ab6…; title screen (any key). |
+
+GTA recordings (same 34 s script, tests/gta_keys.txt), no console errors in either:
+- Qwen4-Max-Preview "NEON BAY": title (Enter), parking-lot start with E prompt, gets in, drives (speedometer ~50), courier job, round minimap, speed dial, cash/health/heat HUD, beach/parks/parking lots, 3 modes. JS 10.3 ms/frame median (19.4 p95).
+- Qwen3.8-Max "Grand Tiny Auto": title (any key), "steal the red car", gets in, drives up to 166 km/h, 1 wanted star after crashing, cash, square minimap, speed. JS 1.2 ms/frame median (4.5 p95). Drove off the city edge in this run (map boundary visible).
+Verdict: both meet the brief; Qwen4-Max's is far more elaborate and polished (2x the code, missions, modes) but heavier per frame; Qwen3.8-Max finished faster (~39 vs ~94 min) and showed the wanted/police mechanic in this short run.
